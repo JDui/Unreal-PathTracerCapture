@@ -1,0 +1,20 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "AXi_PathTracerCapture",
+  "Description": "Capture single-frame viewport path traced PNG and optional synthesized alpha output.",
+  "Category": "Rendering",
+  "EnabledByDefault": true,
+  "CanContainContent": true,
+  "IsBetaVersion": true,
+  "Installed": false,
+  "Plugins": [],
+  "Modules": [
+    {
+      "Name": "PathTracerCaptureEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

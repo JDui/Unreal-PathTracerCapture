@@ -1,0 +1,19 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.5",
+  "Category": "",
+  "Description": "Host project for PathTracerCapture plugin.",
+  "Modules": [
+    {
+      "Name": "PathTracerCaptureHost",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "PathTracerCapture",
+      "Enabled": true
+    }
+  ]
+}
