@@ -4,7 +4,6 @@
 #include "Widgets/SCompoundWidget.h"
 
 class IDetailsView;
-class UMaterialInterface;
 struct FPropertyAndParent;
 struct FPropertyChangedEvent;
 
@@ -39,7 +38,6 @@ private:
 
 private:
     TSharedPtr<IDetailsView> DetailsView;
-    TStrongObjectPtr<UMaterialInterface> PreWarmMaterial;
     FTSTicker::FDelegateHandle PreWarmTickHandle;
     bool bIsAlphaModeSelected = false;
     bool bIsPreWarmingAlpha = false;

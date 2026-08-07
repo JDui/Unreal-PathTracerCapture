@@ -5,7 +5,6 @@
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
 #include "IDetailsView.h"
-#include "Materials/MaterialInterface.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "PathTracerCaptureEditorSubsystem.h"
@@ -14,7 +13,6 @@
 #include "PropertyEditorModule.h"
 #include "UObject/Class.h"
 #include "UObject/Field.h"
-#include "UObject/StrongObjectPtr.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
@@ -145,6 +143,14 @@ SPathTracerCapturePanel::~SPathTracerCapturePanel()
         FTSTicker::GetCoreTicker().RemoveTicker(PreWarmTickHandle);
         PreWarmTickHandle.Reset();
     }
+
+    if (GEditor)
+    {
+        if (UPathTracerCaptureEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UPathTracerCaptureEditorSubsystem>())
+        {
+            Subsystem->EndAlphaPreWarm();
+        }
+    }
 }
 
 FReply SPathTracerCapturePanel::OnRenderClicked()
@@ -224,28 +230,17 @@ FReply SPathTracerCapturePanel::OnPreWarmAlphaClicked()
         return FReply::Handled();
     }
 
-    FSoftObjectPath MaterialPath = Settings->AlphaPostProcessMaterial;
-    if (MaterialPath.IsNull() || MaterialPath.ToString().Equals(TEXT("/Game/Ref/MP_ALPHA.MP_ALPHA"), ESearchCase::IgnoreCase))
-    {
-        MaterialPath = UPathTracerCaptureSettings::GetDefaultAlphaPostProcessMaterialPath();
-    }
-
     FString Message;
-    if (UObject* LoadedObject = MaterialPath.TryLoad())
+    if (GEditor)
     {
-        PreWarmMaterial.Reset(Cast<UMaterialInterface>(LoadedObject));
-        if (PreWarmMaterial)
+        if (UPathTracerCaptureEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UPathTracerCaptureEditorSubsystem>())
         {
-            Message = FString::Printf(TEXT("预热Alpha通道：已加载材质 %s，一秒后释放引用。"), *MaterialPath.ToString());
-        }
-        else
-        {
-            Message = FString::Printf(TEXT("预热Alpha通道：资源 %s 不是有效的材质接口。"), *MaterialPath.ToString());
+            Subsystem->StartAlphaPreWarm(Settings->AlphaPostProcessMaterial, Message);
         }
     }
-    else
+    if (Message.IsEmpty())
     {
-        Message = FString::Printf(TEXT("预热Alpha通道：无法加载材质 %s。"), *MaterialPath.ToString());
+        Message = TEXT("预热Alpha通道：编辑器子系统不可用，预热失败。");
     }
 
     bIsPreWarmingAlpha = true;
@@ -272,18 +267,18 @@ FReply SPathTracerCapturePanel::OnPreWarmAlphaClicked()
 
 bool SPathTracerCapturePanel::OnPreWarmAlphaTick(float DeltaTime)
 {
-    PreWarmMaterial.Reset();
-    bIsPreWarmingAlpha = false;
-    PreWarmTickHandle.Reset();
-    Invalidate(EInvalidateWidgetReason::LayoutAndVolatility | EInvalidateWidgetReason::Visibility);
-
     if (GEditor)
     {
         if (UPathTracerCaptureEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UPathTracerCaptureEditorSubsystem>())
         {
-            Subsystem->AppendStatusLog(TEXT("预热Alpha通道：已完成，已释放材质引用。"));
+            Subsystem->EndAlphaPreWarm();
+            Subsystem->AppendStatusLog(TEXT("预热Alpha通道：已完成，已移除视口后处理体积并释放材质引用。"));
         }
     }
+
+    bIsPreWarmingAlpha = false;
+    PreWarmTickHandle.Reset();
+    Invalidate(EInvalidateWidgetReason::LayoutAndVolatility | EInvalidateWidgetReason::Visibility);
 
     return false;
 }
@@ -342,7 +337,18 @@ bool SPathTracerCapturePanel::IsPreWarmAlphaEnabled() const
 
 EVisibility SPathTracerCapturePanel::GetPreWarmAlphaVisibility() const
 {
-    return bIsAlphaModeSelected ? EVisibility::Visible : EVisibility::Collapsed;
+    if (!bIsAlphaModeSelected)
+    {
+        return EVisibility::Collapsed;
+    }
+
+    const UPathTracerCaptureSettings* Settings = GetDefault<UPathTracerCaptureSettings>();
+    if (!Settings || Settings->AlphaSource != EPathTracerCaptureAlphaSource::PostProcessMaterial)
+    {
+        return EVisibility::Collapsed;
+    }
+
+    return EVisibility::Visible;
 }
 
 FText SPathTracerCapturePanel::GetPreWarmAlphaText() const
@@ -368,7 +374,9 @@ bool SPathTracerCapturePanel::IsSettingsPropertyVisible(const FPropertyAndParent
 
 void SPathTracerCapturePanel::OnSettingsPropertyChanged(const FPropertyChangedEvent& PropertyChangedEvent)
 {
-    if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UPathTracerCaptureSettings, AlphaMode))
+    const FName ChangedName = PropertyChangedEvent.GetPropertyName();
+    if (ChangedName == GET_MEMBER_NAME_CHECKED(UPathTracerCaptureSettings, AlphaMode)
+        || ChangedName == GET_MEMBER_NAME_CHECKED(UPathTracerCaptureSettings, AlphaSource))
     {
         UpdateAlphaModeState();
         if (DetailsView.IsValid())

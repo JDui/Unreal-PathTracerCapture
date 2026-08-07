@@ -4,6 +4,7 @@
 #include "Containers/Ticker.h"
 #include "EditorSubsystem.h"
 #include "PathTracerCaptureTypes.h"
+#include "UObject/StrongObjectPtr.h"
 #include "PathTracerCaptureEditorSubsystem.generated.h"
 
 class FEditorViewportClient;
@@ -43,6 +44,10 @@ public:
     void AppendStatusLog(const FString& Message);
     const FOnPathTracerCaptureUpdated& OnCaptureUpdated() const { return UpdatedEvent; }
 
+    // 预热：将Alpha后处理材质通过临时后处理体积应用到视口，触发着色器编译后移除。
+    bool StartAlphaPreWarm(const FSoftObjectPath& MaterialPath, FString& OutMessage);
+    void EndAlphaPreWarm();
+
 private:
     struct FPostProcessVolumeState
     {
@@ -75,6 +80,8 @@ private:
     bool StartViewportAuxiliaryAlphaCapture();
     bool FinalizeAlphaOutput(const FString& SourcePngFile, FString& OutPrimaryOutputFile);
     UWorld* ResolveCaptureWorld() const;
+    UWorld* ResolvePreWarmWorld() const;
+    FEditorViewportClient* GetActiveViewportClient() const;
     void SaveCVar(const FString& Name);
     void RestoreCVars();
     int32 GetCVarInt(const FString& Name, int32 DefaultValue) const;
@@ -111,4 +118,8 @@ private:
     TObjectPtr<UMaterialInterface> TemporaryAlphaPostProcessMaterial;
 
     TArray<FPostProcessVolumeState> DisabledPostProcessVolumes;
+
+    TWeakObjectPtr<APostProcessVolume> PreWarmAlphaPostProcessVolume;
+    TWeakObjectPtr<UWorld> PreWarmAlphaWorld;
+    TStrongObjectPtr<UMaterialInterface> PreWarmAlphaMaterial;
 };

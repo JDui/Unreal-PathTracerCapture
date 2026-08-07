@@ -172,6 +172,7 @@ void UPathTracerCaptureEditorSubsystem::Initialize(FSubsystemCollectionBase& Col
 void UPathTracerCaptureEditorSubsystem::Deinitialize()
 {
     CancelCapture();
+    EndAlphaPreWarm();
     if (TickHandle.IsValid())
     {
         FTSTicker::GetCoreTicker().RemoveTicker(TickHandle);
@@ -205,6 +206,103 @@ void UPathTracerCaptureEditorSubsystem::AppendStatusLog(const FString& Message)
 
     StatusLog.Add(FString::Printf(TEXT("[信息] %s"), *Message));
     UpdatedEvent.Broadcast();
+}
+
+bool UPathTracerCaptureEditorSubsystem::StartAlphaPreWarm(const FSoftObjectPath& InMaterialPath, FString& OutMessage)
+{
+    EndAlphaPreWarm();
+
+    FSoftObjectPath MaterialPath = InMaterialPath;
+    if (MaterialPath.IsNull()
+        || MaterialPath.ToString().Equals(TEXT("/Game/Ref/MP_ALPHA.MP_ALPHA"), ESearchCase::IgnoreCase))
+    {
+        MaterialPath = UPathTracerCaptureSettings::GetDefaultAlphaPostProcessMaterialPath();
+    }
+
+    UObject* LoadedObject = MaterialPath.TryLoad();
+    UMaterialInterface* Material = Cast<UMaterialInterface>(LoadedObject);
+    if (!Material)
+    {
+        OutMessage = FString::Printf(TEXT("预热Alpha通道：无法加载材质 %s。"), *MaterialPath.ToString());
+        return false;
+    }
+
+    UWorld* World = ResolvePreWarmWorld();
+    if (!World)
+    {
+        OutMessage = TEXT("预热Alpha通道：未找到可用的世界或视口，无法在视口中加载材质。");
+        return false;
+    }
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.ObjectFlags = RF_Transient;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    APostProcessVolume* Volume = World->SpawnActor<APostProcessVolume>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+    if (!Volume)
+    {
+        OutMessage = TEXT("预热Alpha通道：创建临时后处理体积失败。");
+        return false;
+    }
+
+    Volume->bUnbound = true;
+    Volume->Priority = 100000.0f;
+    Volume->BlendWeight = 1.0f;
+    Volume->Settings = FPostProcessSettings();
+    Volume->Settings.AddBlendable(Material, 1.0f);
+
+    PreWarmAlphaPostProcessVolume = Volume;
+    PreWarmAlphaWorld = World;
+    PreWarmAlphaMaterial.Reset(Material);
+
+    if (FEditorViewportClient* Client = GetActiveViewportClient())
+    {
+        Client->Invalidate();
+    }
+
+    OutMessage = FString::Printf(
+        TEXT("预热Alpha通道：已在视口加载材质 %s，正在触发着色器编译，一秒后移除。"),
+        *MaterialPath.ToString());
+    return true;
+}
+
+void UPathTracerCaptureEditorSubsystem::EndAlphaPreWarm()
+{
+    if (PreWarmAlphaPostProcessVolume.IsValid())
+    {
+        PreWarmAlphaPostProcessVolume->Destroy();
+    }
+    PreWarmAlphaPostProcessVolume.Reset();
+    PreWarmAlphaWorld.Reset();
+    PreWarmAlphaMaterial.Reset();
+
+    if (FEditorViewportClient* Client = GetActiveViewportClient())
+    {
+        Client->Invalidate();
+    }
+}
+
+UWorld* UPathTracerCaptureEditorSubsystem::ResolvePreWarmWorld() const
+{
+    if (FEditorViewportClient* Client = GetActiveViewportClient())
+    {
+        if (UWorld* World = Client->GetWorld())
+        {
+            return World;
+        }
+    }
+    return ResolveCaptureWorld();
+}
+
+FEditorViewportClient* UPathTracerCaptureEditorSubsystem::GetActiveViewportClient() const
+{
+    if (GEditor)
+    {
+        if (FViewport* ActiveViewport = GEditor->GetActiveViewport())
+        {
+            return static_cast<FEditorViewportClient*>(ActiveViewport->GetClient());
+        }
+    }
+    return nullptr;
 }
 
 bool UPathTracerCaptureEditorSubsystem::StartCapture(const FPathTracerCaptureRequest& Request)
