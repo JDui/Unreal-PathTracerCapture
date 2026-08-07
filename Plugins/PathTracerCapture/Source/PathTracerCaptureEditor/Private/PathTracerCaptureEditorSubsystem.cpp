@@ -184,7 +184,7 @@ bool UPathTracerCaptureEditorSubsystem::CanStartCapture(FText& OutReason) const
 {
     if (Progress.bIsRunning)
     {
-        OutReason = FText::FromString(TEXT("A capture is already running."));
+        OutReason = FText::FromString(TEXT("捕获正在进行中。"));
         return false;
     }
 
@@ -194,6 +194,17 @@ bool UPathTracerCaptureEditorSubsystem::CanStartCapture(FText& OutReason) const
 FString UPathTracerCaptureEditorSubsystem::GetStatusLogText() const
 {
     return FString::Join(StatusLog, TEXT("\n"));
+}
+
+void UPathTracerCaptureEditorSubsystem::AppendStatusLog(const FString& Message)
+{
+    if (Message.IsEmpty())
+    {
+        return;
+    }
+
+    StatusLog.Add(FString::Printf(TEXT("[信息] %s"), *Message));
+    UpdatedEvent.Broadcast();
 }
 
 bool UPathTracerCaptureEditorSubsystem::StartCapture(const FPathTracerCaptureRequest& Request)
@@ -225,11 +236,11 @@ bool UPathTracerCaptureEditorSubsystem::StartCapture(const FPathTracerCaptureReq
     StatusLog.Reset();
     LastResult = FPathTracerCaptureResult();
     LastResult.Backend = EPathTracerCaptureBackend::Viewport;
-    SetStatus(EPathTracerCapturePhase::Preparing, TEXT("Preparing viewport path tracing capture..."), 0);
+    SetStatus(EPathTracerCapturePhase::Preparing, TEXT("正在准备视口路径追踪捕获..."), 0);
 
     if (!StartViewportCapture(ActiveRequest))
     {
-        FinishCapture(false, LastResult.ErrorMessage.IsEmpty() ? TEXT("Viewport capture failed to start.") : LastResult.ErrorMessage);
+        FinishCapture(false, LastResult.ErrorMessage.IsEmpty() ? TEXT("视口捕获启动失败。") : LastResult.ErrorMessage);
         return false;
     }
 
@@ -245,8 +256,8 @@ void UPathTracerCaptureEditorSubsystem::CancelCapture()
         return;
     }
 
-    FinishCapture(false, TEXT("Capture cancelled by user."));
-    SetStatus(EPathTracerCapturePhase::Cancelled, TEXT("Cancelled."));
+    FinishCapture(false, TEXT("捕获已被用户取消。"));
+    SetStatus(EPathTracerCapturePhase::Cancelled, TEXT("已取消。"));
 }
 
 bool UPathTracerCaptureEditorSubsystem::Tick(float DeltaTime)
@@ -259,7 +270,7 @@ bool UPathTracerCaptureEditorSubsystem::Tick(float DeltaTime)
     const double NowSeconds = FPlatformTime::Seconds();
     if (NowSeconds - CaptureStartSeconds > 600.0)
     {
-        FinishCapture(false, TEXT("Capture timed out after 10 minutes."));
+        FinishCapture(false, TEXT("捕获超过10分钟，已超时。"));
         return true;
     }
 
@@ -268,7 +279,7 @@ bool UPathTracerCaptureEditorSubsystem::Tick(float DeltaTime)
     const int32 EstimatedSPP = FMath::Clamp(FMath::RoundToInt(ActiveRequest.TargetSPP * Normalized), 0, ActiveRequest.TargetSPP);
     if (NowSeconds - LastProgressUpdateSeconds > 0.2)
     {
-        SetStatus(EPathTracerCapturePhase::Accumulating, FString::Printf(TEXT("Accumulating viewport path tracing samples... (%d/%d)"), EstimatedSPP, ActiveRequest.TargetSPP), EstimatedSPP);
+        SetStatus(EPathTracerCapturePhase::Accumulating, FString::Printf(TEXT("正在累积视口路径追踪采样... (%d/%d)"), EstimatedSPP, ActiveRequest.TargetSPP), EstimatedSPP);
         LastProgressUpdateSeconds = NowSeconds;
     }
 
@@ -288,18 +299,18 @@ bool UPathTracerCaptureEditorSubsystem::Tick(float DeltaTime)
         {
             if (!StartViewportAuxiliaryAlphaCapture())
             {
-                FinishCapture(false, LastResult.ErrorMessage.IsEmpty() ? TEXT("Failed to capture auxiliary alpha channel.") : LastResult.ErrorMessage);
+                FinishCapture(false, LastResult.ErrorMessage.IsEmpty() ? TEXT("辅助Alpha通道捕获失败。") : LastResult.ErrorMessage);
             }
         }
         return true;
     }
     bViewportAuxiliaryAlphaCaptureInProgress = false;
 
-    SetStatus(EPathTracerCapturePhase::Encoding, TEXT("Encoding PNG output..."), ActiveRequest.TargetSPP);
+    SetStatus(EPathTracerCapturePhase::Encoding, TEXT("正在编码PNG输出..."), ActiveRequest.TargetSPP);
     FString PrimaryOutputFile = PendingOutputPath;
     if (!FinalizeAlphaOutput(PendingOutputPath, PrimaryOutputFile))
     {
-        FinishCapture(false, TEXT("Failed to post-process alpha output."));
+        FinishCapture(false, TEXT("Alpha输出后处理失败。"));
         return true;
     }
 
@@ -312,19 +323,19 @@ bool UPathTracerCaptureEditorSubsystem::ValidateRequest(const FPathTracerCapture
 {
     if (Request.ResolutionX < 16 || Request.ResolutionY < 16)
     {
-        OutError = TEXT("Resolution must be at least 16x16.");
+        OutError = TEXT("分辨率不能小于16x16。");
         return false;
     }
 
     if (Request.TargetSPP <= 0)
     {
-        OutError = TEXT("TargetSPP must be greater than 0.");
+        OutError = TEXT("目标采样数（TargetSPP）必须大于0。");
         return false;
     }
 
     if (Request.OutputDirectory.IsEmpty())
     {
-        OutError = TEXT("Output directory is empty.");
+        OutError = TEXT("输出目录为空。");
         return false;
     }
 
@@ -332,7 +343,7 @@ bool UPathTracerCaptureEditorSubsystem::ValidateRequest(const FPathTracerCapture
     {
         if (!IFileManager::Get().MakeDirectory(*Request.OutputDirectory, true))
         {
-            OutError = FString::Printf(TEXT("Failed to create output directory: %s"), *Request.OutputDirectory);
+            OutError = FString::Printf(TEXT("无法创建输出目录：%s"), *Request.OutputDirectory);
             return false;
         }
     }
@@ -352,7 +363,7 @@ void UPathTracerCaptureEditorSubsystem::SetStatus(EPathTracerCapturePhase Phase,
     Progress.StatusMessage = Message;
     Progress.EstimatedCurrentSPP = EstimatedSPP;
 
-    const FString LogLine = FString::Printf(TEXT("[%s] %s"), *UEnum::GetValueAsString(Phase), *Message);
+    const FString LogLine = FString::Printf(TEXT("[%s] %s"), *UEnum::GetDisplayValueAsText(Phase).ToString(), *Message);
     StatusLog.Add(LogLine);
     UpdatedEvent.Broadcast();
 }
@@ -365,7 +376,7 @@ void UPathTracerCaptureEditorSubsystem::FinishCapture(bool bSuccess, const FStri
     if (bSuccess)
     {
         Progress.Phase = EPathTracerCapturePhase::Done;
-        Progress.StatusMessage = TEXT("Capture completed.");
+        Progress.StatusMessage = TEXT("捕获完成。");
     }
     else
     {
@@ -428,21 +439,21 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportCapture(const FPathTracerCa
 {
     if (!GEditor)
     {
-        LastResult.ErrorMessage = TEXT("Editor is not available.");
+        LastResult.ErrorMessage = TEXT("编辑器不可用。");
         return false;
     }
 
     FViewport* ActiveViewport = GEditor->GetActiveViewport();
     if (!ActiveViewport)
     {
-        LastResult.ErrorMessage = TEXT("No active viewport found.");
+        LastResult.ErrorMessage = TEXT("未找到活动视口。");
         return false;
     }
 
     FEditorViewportClient* ViewportClient = static_cast<FEditorViewportClient*>(ActiveViewport->GetClient());
     if (!ViewportClient)
     {
-        LastResult.ErrorMessage = TEXT("Active viewport is not an editor viewport.");
+        LastResult.ErrorMessage = TEXT("活动视口不是编辑器视口。");
         return false;
     }
 
@@ -511,13 +522,13 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportCapture(const FPathTracerCa
     SetStatus(
         EPathTracerCapturePhase::Accumulating,
         bViewportAuxiliaryAlphaCaptureRequired
-            ? FString::Printf(TEXT("Starting viewport path tracing capture (%dx%d, %d spp). %s alpha pass will run next..."), Resolution.X, Resolution.Y, Request.TargetSPP, ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial ? TEXT("PostProcess") : TEXT("WorldNormal"))
-            : FString::Printf(TEXT("Starting viewport path tracing capture (%dx%d, %d spp)..."), Resolution.X, Resolution.Y, Request.TargetSPP),
+            ? FString::Printf(TEXT("正在开始视口路径追踪捕获（%dx%d，%d spp）。接下来将运行%s Alpha通道采集..."), Resolution.X, Resolution.Y, Request.TargetSPP, ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial ? TEXT("后处理") : TEXT("世界法线"))
+            : FString::Printf(TEXT("正在开始视口路径追踪捕获（%dx%d，%d spp）..."), Resolution.X, Resolution.Y, Request.TargetSPP),
         0);
 
     if (!ActiveViewport->TakeHighResScreenShot())
     {
-        LastResult.ErrorMessage = TEXT("Failed to trigger viewport path tracing capture.");
+        LastResult.ErrorMessage = TEXT("触发视口路径追踪捕获失败。");
         return false;
     }
 
@@ -528,13 +539,13 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
 {
     if (!ViewportSnapshot.bValid || !ViewportSnapshot.Viewport || !ViewportSnapshot.Client)
     {
-        LastResult.ErrorMessage = TEXT("Viewport state was invalid before auxiliary alpha capture.");
+        LastResult.ErrorMessage = TEXT("辅助Alpha捕获前视口状态无效。");
         return false;
     }
 
     if (PendingAuxiliaryAlphaCapturePath.IsEmpty())
     {
-        LastResult.ErrorMessage = TEXT("Auxiliary alpha output path is empty.");
+        LastResult.ErrorMessage = TEXT("辅助Alpha输出路径为空。");
         return false;
     }
 
@@ -551,7 +562,7 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
             if (!TemporaryAlphaPostProcessMaterial)
             {
                 LastResult.ErrorMessage = FString::Printf(
-                    TEXT("Failed to load alpha post-process material: %s. Set a valid material asset path."),
+                    TEXT("无法加载Alpha后处理材质：%s。请设置有效的材质资源路径。"),
                     *MaterialPath.ToString());
                 return false;
             }
@@ -559,7 +570,7 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
             UWorld* WorldForAlphaCapture = ResolveCaptureWorld();
             if (!WorldForAlphaCapture)
             {
-                LastResult.ErrorMessage = TEXT("Capture world is unavailable for alpha post-process capture.");
+                LastResult.ErrorMessage = TEXT("Alpha后处理捕获所需的捕获世界不可用。");
                 return false;
             }
 
@@ -577,7 +588,7 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
             TemporaryAlphaPostProcessVolume = WorldForAlphaCapture->SpawnActor<APostProcessVolume>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
             if (!TemporaryAlphaPostProcessVolume)
             {
-                LastResult.ErrorMessage = TEXT("Failed to create temporary post-process volume for alpha capture.");
+                LastResult.ErrorMessage = TEXT("创建用于Alpha捕获的临时后处理体积失败。");
                 return false;
             }
 
@@ -600,20 +611,20 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
             ViewportSnapshot.Client->ChangeBufferVisualizationMode(NAME_None);
             ViewportSnapshot.Client->SetViewMode(VMI_Lit);
             ViewportSnapshot.Client->Invalidate();
-            StatusLog.Add(FString::Printf(TEXT("[Info] Post alpha capture world: %s"), *WorldForAlphaCapture->GetName()));
-            StatusLog.Add(TEXT("[Info] Post alpha pass forced: EyeAdaptation=0, LocalExposure=0, AA/Bloom/DOF/MotionBlur/LensFlare/Fringe=0."));
+            StatusLog.Add(FString::Printf(TEXT("[信息] 后处理Alpha采集世界：%s"), *WorldForAlphaCapture->GetName()));
+            StatusLog.Add(TEXT("[信息] 已强制后处理Alpha通道设置：EyeAdaptation=0、LocalExposure=0、AA/Bloom/DOF/MotionBlur/LensFlare/Fringe=0。"));
             UpdatedEvent.Broadcast();
 
             bViewportAuxiliaryAlphaCapturePrepared = true;
             ViewportAuxiliaryAlphaWarmupFramesRemaining = 1;
-            SetStatus(EPathTracerCapturePhase::Encoding, TEXT("Warming up post-process alpha pass (1 frame)..."), ActiveRequest.TargetSPP);
+            SetStatus(EPathTracerCapturePhase::Encoding, TEXT("正在预热后处理Alpha通道（1帧）..."), ActiveRequest.TargetSPP);
             return true;
         }
 
         if (ViewportAuxiliaryAlphaWarmupFramesRemaining > 0)
         {
             --ViewportAuxiliaryAlphaWarmupFramesRemaining;
-            SetStatus(EPathTracerCapturePhase::Encoding, TEXT("Post-process alpha pass warmed up. Capturing next frame..."), ActiveRequest.TargetSPP);
+            SetStatus(EPathTracerCapturePhase::Encoding, TEXT("后处理Alpha通道已预热，正在捕获下一帧..."), ActiveRequest.TargetSPP);
             return true;
         }
     }
@@ -636,12 +647,12 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
     SetStatus(
         EPathTracerCapturePhase::Encoding,
         ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial
-            ? TEXT("Capturing post-process alpha channel...")
-            : TEXT("Capturing WorldNormal channel for alpha synthesis..."),
+            ? TEXT("正在捕获后处理Alpha通道...")
+            : TEXT("正在捕获世界法线通道以合成Alpha..."),
         ActiveRequest.TargetSPP);
     if (!ViewportSnapshot.Viewport->TakeHighResScreenShot())
     {
-        LastResult.ErrorMessage = TEXT("Failed to trigger auxiliary alpha capture.");
+        LastResult.ErrorMessage = TEXT("触发辅助Alpha捕获失败。");
         return false;
     }
 
@@ -668,7 +679,7 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
 
     if (PendingAuxiliaryAlphaCapturePath.IsEmpty() || !IFileManager::Get().FileExists(*PendingAuxiliaryAlphaCapturePath))
     {
-        StatusLog.Add(TEXT("[Error] Auxiliary alpha capture file was not found."));
+        StatusLog.Add(TEXT("[错误] 未找到辅助Alpha捕获文件。"));
         UpdatedEvent.Broadcast();
         return false;
     }
@@ -678,14 +689,14 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
     TArray64<uint8> AuxRawData;
     if (!PathTracerCapture::DecodePngToBgra8(PendingAuxiliaryAlphaCapturePath, AuxWidth, AuxHeight, AuxRawData))
     {
-        StatusLog.Add(TEXT("[Error] Failed to decode auxiliary alpha capture."));
+        StatusLog.Add(TEXT("[错误] 辅助Alpha捕获解码失败。"));
         UpdatedEvent.Broadcast();
         return false;
     }
 
     if (AuxWidth != MainWidth || AuxHeight != MainHeight)
     {
-        StatusLog.Add(TEXT("[Error] Auxiliary alpha capture resolution does not match color output."));
+        StatusLog.Add(TEXT("[错误] 辅助Alpha捕获分辨率与颜色输出不匹配。"));
         UpdatedEvent.Broadcast();
         return false;
     }
@@ -710,7 +721,7 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
         {
             StatusLog.Add(
                 FString::Printf(
-                    TEXT("[Info] Remapped alpha with Levels(InputBlack=%d, Gamma=%.2f, InputWhite=%d)."),
+                    TEXT("[信息] 已使用 Levels（输入黑=%d、伽马=%.2f、输入白=%d）重映射Alpha。"),
                     static_cast<int32>(LevelsInputBlack),
                     static_cast<double>(LevelsGamma),
                     static_cast<int32>(LevelsInputWhite)));
@@ -719,7 +730,7 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
     }
     else
     {
-        StatusLog.Add(TEXT("[Info] Raw alpha enabled: skipped Levels alpha remap."));
+        StatusLog.Add(TEXT("[信息] 已启用原始Alpha：跳过 Levels 重映射。"));
         UpdatedEvent.Broadcast();
     }
 
@@ -733,8 +744,8 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
 
         StatusLog.Add(
             ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial
-                ? TEXT("[Info] Merged alpha from post-process alpha pass into RGBA output.")
-                : TEXT("[Info] Merged alpha from WorldNormal binary mask into RGBA output."));
+                ? TEXT("[信息] 已将后处理Alpha通道合并到RGBA输出。")
+                : TEXT("[信息] 已将世界法线二值掩码合并到RGBA输出。"));
         UpdatedEvent.Broadcast();
         return true;
     }
@@ -747,7 +758,7 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
             return false;
         }
 
-        StatusLog.Add(FString::Printf(TEXT("[Info] Wrote separate alpha texture: %s"), *AlphaMaskPath));
+        StatusLog.Add(FString::Printf(TEXT("[信息] 已写入分离的Alpha贴图：%s"), *AlphaMaskPath));
         UpdatedEvent.Broadcast();
         return true;
     }
@@ -805,7 +816,7 @@ void UPathTracerCaptureEditorSubsystem::DisableOtherPostProcessVolumesForAlphaCa
 
     if (DisabledPostProcessVolumes.Num() > 0)
     {
-        StatusLog.Add(FString::Printf(TEXT("[Info] Isolated post alpha pass: disabled %d scene post process volumes."), DisabledPostProcessVolumes.Num()));
+        StatusLog.Add(FString::Printf(TEXT("[信息] 已隔离后处理Alpha通道：禁用了场景中的%d个后处理体积。"), DisabledPostProcessVolumes.Num()));
         UpdatedEvent.Broadcast();
     }
 }

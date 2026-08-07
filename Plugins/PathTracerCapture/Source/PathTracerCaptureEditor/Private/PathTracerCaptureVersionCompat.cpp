@@ -140,13 +140,13 @@ bool FPathTracerCaptureVersionCompat::IsPathTracingSupported(FText& OutReason)
 {
     if (!GDynamicRHI)
     {
-        OutReason = FText::FromString(TEXT("RHI is not initialized."));
+        OutReason = FText::FromString(TEXT("RHI未初始化。"));
         return false;
     }
 
     if (!GRHISupportsRayTracing)
     {
-        OutReason = FText::FromString(TEXT("Current RHI does not support ray tracing."));
+        OutReason = FText::FromString(TEXT("当前RHI不支持光线追踪。"));
         return false;
     }
 

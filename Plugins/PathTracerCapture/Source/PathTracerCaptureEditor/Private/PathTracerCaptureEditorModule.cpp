@@ -36,7 +36,7 @@ void FPathTracerCaptureEditorModule::RegisterMenus()
     Section.AddMenuEntry(
         "PathTracerCapture_OpenTab",
         FText::FromString(TEXT("AXi_PathTracerCapture")),
-        FText::FromString(TEXT("Open AXi_PathTracerCapture panel.")),
+        FText::FromString(TEXT("打开 AXi_PathTracerCapture 面板。")),
         FSlateIcon(),
         FUIAction(FExecuteAction::CreateRaw(this, &FPathTracerCaptureEditorModule::OpenPluginWindow)));
 }

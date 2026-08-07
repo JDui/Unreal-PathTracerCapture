@@ -40,6 +40,7 @@ public:
 
     bool CanStartCapture(FText& OutReason) const;
     FString GetStatusLogText() const;
+    void AppendStatusLog(const FString& Message);
     const FOnPathTracerCaptureUpdated& OnCaptureUpdated() const { return UpdatedEvent; }
 
 private:

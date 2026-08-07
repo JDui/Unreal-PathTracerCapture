@@ -7,35 +7,35 @@
 UENUM(BlueprintType)
 enum class EPathTracerCaptureBackend : uint8
 {
-    Viewport UMETA(DisplayName = "Viewport"),
+    Viewport UMETA(DisplayName = "视口"),
     MovieRenderQueue UMETA(Hidden)
 };
 
 UENUM(BlueprintType)
 enum class EPathTracerCaptureAlphaMode : uint8
 {
-    None UMETA(DisplayName = "No Alpha"),
-    MergeAlpha UMETA(DisplayName = "Merge Alpha Into RGBA"),
-    SeparateAlphaTexture UMETA(DisplayName = "Separate Alpha Texture")
+    None UMETA(DisplayName = "无Alpha"),
+    MergeAlpha UMETA(DisplayName = "合并Alpha到RGBA"),
+    SeparateAlphaTexture UMETA(DisplayName = "分离Alpha贴图")
 };
 
 UENUM(BlueprintType)
 enum class EPathTracerCaptureAlphaSource : uint8
 {
-    WorldNormalMask UMETA(DisplayName = "WorldNormal Binary"),
-    PostProcessMaterial UMETA(DisplayName = "Post Process Material")
+    WorldNormalMask UMETA(DisplayName = "世界法线二值"),
+    PostProcessMaterial UMETA(DisplayName = "后处理材质")
 };
 
 UENUM(BlueprintType)
 enum class EPathTracerCapturePhase : uint8
 {
-    Idle UMETA(DisplayName = "Idle"),
-    Preparing UMETA(DisplayName = "Preparing"),
-    Accumulating UMETA(DisplayName = "Accumulating"),
-    Encoding UMETA(DisplayName = "Encoding"),
-    Done UMETA(DisplayName = "Done"),
-    Failed UMETA(DisplayName = "Failed"),
-    Cancelled UMETA(DisplayName = "Cancelled")
+    Idle UMETA(DisplayName = "空闲"),
+    Preparing UMETA(DisplayName = "准备中"),
+    Accumulating UMETA(DisplayName = "累积中"),
+    Encoding UMETA(DisplayName = "编码中"),
+    Done UMETA(DisplayName = "完成"),
+    Failed UMETA(DisplayName = "失败"),
+    Cancelled UMETA(DisplayName = "已取消")
 };
 
 USTRUCT(BlueprintType)
@@ -43,37 +43,37 @@ struct FPathTracerCaptureRequest
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "渲染后端"))
     EPathTracerCaptureBackend Backend = EPathTracerCaptureBackend::Viewport;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (ClampMin = "16", ClampMax = "16384"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "分辨率 X", ClampMin = "16", ClampMax = "16384"))
     int32 ResolutionX = 1920;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (ClampMin = "16", ClampMax = "16384"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "分辨率 Y", ClampMin = "16", ClampMax = "16384"))
     int32 ResolutionY = 1080;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (ClampMin = "1", ClampMax = "8192"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "目标采样数 (SPP)", ClampMin = "1", ClampMax = "8192"))
     int32 TargetSPP = 128;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "输出目录"))
     FString OutputDirectory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "文件名格式"))
     FString FilenamePattern = TEXT("AXi_{date}{seq}");
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "启用降噪器"))
     bool bEnableDenoiser = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha模式"))
     EPathTracerCaptureAlphaMode AlphaMode = EPathTracerCaptureAlphaMode::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha来源"))
     EPathTracerCaptureAlphaSource AlphaSource = EPathTracerCaptureAlphaSource::PostProcessMaterial;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (AllowedClasses = "MaterialInterface"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "透明通道后处理材质", AllowedClasses = "/Script/Engine.MaterialInterface"))
     FSoftObjectPath AlphaPostProcessMaterial = FSoftObjectPath(TEXT("/PathTracerCapture/Ref/MP_ALPHA.MP_ALPHA"));
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Raw Alpha (Skip Remap)"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "原始Alpha（跳过重映射）"))
     bool bUseRawAlphaMask = false;
 };
 

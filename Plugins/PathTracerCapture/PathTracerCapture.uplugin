@@ -1,9 +1,9 @@
 {
   "FileVersion": 3,
-  "Version": 1,
-  "VersionName": "0.1.0",
+  "Version": 2,
+  "VersionName": "0.2.0",
   "FriendlyName": "AXi_PathTracerCapture",
-  "Description": "Capture single-frame viewport path traced PNG and optional synthesized alpha output.",
+  "Description": "捕获视口路径追踪渲染的PNG帧，并支持可选的透明通道合成输出。",
   "Category": "Rendering",
   "EnabledByDefault": true,
   "CanContainContent": true,
