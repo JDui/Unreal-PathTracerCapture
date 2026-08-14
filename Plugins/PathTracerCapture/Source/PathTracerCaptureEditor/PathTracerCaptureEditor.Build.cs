@@ -30,6 +30,7 @@ public class PathTracerCaptureEditor : ModuleRules
                 "PropertyEditor",
                 "RenderCore",
                 "RHI",
+                "Settings",
                 "ToolMenus",
                 "UnrealEd"
             }

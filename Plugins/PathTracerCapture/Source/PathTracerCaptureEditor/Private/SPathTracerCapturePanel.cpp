@@ -365,6 +365,11 @@ bool SPathTracerCapturePanel::IsSettingsPropertyVisible(const FPropertyAndParent
 
     if (PropertyAndParent.Property.GetFName() == GET_MEMBER_NAME_CHECKED(UPathTracerCaptureSettings, AlphaPostProcessMaterial))
     {
+        return false;
+    }
+
+    if (PropertyAndParent.Property.GetFName() == GET_MEMBER_NAME_CHECKED(UPathTracerCaptureSettings, AlphaSource))
+    {
         const UPathTracerCaptureSettings* Settings = GetDefault<UPathTracerCaptureSettings>();
         return Settings != nullptr && Settings->AlphaMode != EPathTracerCaptureAlphaMode::None;
     }

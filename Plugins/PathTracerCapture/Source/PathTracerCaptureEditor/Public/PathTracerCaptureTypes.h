@@ -23,7 +23,7 @@ UENUM(BlueprintType)
 enum class EPathTracerCaptureAlphaSource : uint8
 {
     WorldNormalMask UMETA(DisplayName = "世界法线二值"),
-    PostProcessMaterial UMETA(DisplayName = "后处理材质")
+    PostProcessMaterial UMETA(DisplayName = "场景Alpha通道")
 };
 
 UENUM(BlueprintType)
@@ -75,6 +75,9 @@ struct FPathTracerCaptureRequest
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "原始Alpha（跳过重映射）"))
     bool bUseRawAlphaMask = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha Power", UIMin = "0.5", UIMax = "2.0"))
+    float AlphaPower = 1.5f;
 };
 
 USTRUCT(BlueprintType)

@@ -58,6 +58,7 @@ private:
     struct FCVarSnapshot
     {
         TMap<FString, int32> IntValues;
+        TMap<FString, float> FloatValues;
     };
 
     struct FViewportSnapshot
@@ -83,9 +84,12 @@ private:
     UWorld* ResolvePreWarmWorld() const;
     FEditorViewportClient* GetActiveViewportClient() const;
     void SaveCVar(const FString& Name);
+    void SaveCVarFloat(const FString& Name);
     void RestoreCVars();
     int32 GetCVarInt(const FString& Name, int32 DefaultValue) const;
     void SetCVarInt(const FString& Name, int32 Value) const;
+    float GetCVarFloat(const FString& Name, float DefaultValue) const;
+    void SetCVarFloat(const FString& Name, float Value) const;
     void DisableOtherPostProcessVolumesForAlphaCapture(UWorld* InCaptureWorld);
     void RestoreOtherPostProcessVolumes();
 
@@ -108,6 +112,10 @@ private:
     bool bViewportAuxiliaryAlphaCapturePrepared = false;
     bool bViewportAuxiliaryAlphaCaptureInProgress = false;
     int32 ViewportAuxiliaryAlphaWarmupFramesRemaining = 0;
+    int32 ViewportAuxiliaryAlphaCaptureIndex = 0;
+    bool bScreenPercentageRaisedForAuxiliaryCapture = false;
+    static constexpr int32 AuxiliaryAlphaCaptureCount = 3;
+    TArray<FString> PendingAuxiliaryAlphaCapturePaths;
     FString PendingAuxiliaryAlphaCapturePath;
     TWeakObjectPtr<UWorld> CaptureWorld;
 

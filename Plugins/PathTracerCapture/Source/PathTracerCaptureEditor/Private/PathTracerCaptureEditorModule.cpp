@@ -3,6 +3,8 @@
 #include "Framework/Docking/TabManager.h"
 #include "LevelEditor.h"
 #include "SPathTracerCapturePanel.h"
+#include "ISettingsModule.h"
+#include "PathTracerCaptureSettings.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
 
@@ -10,6 +12,15 @@ const FName FPathTracerCaptureEditorModule::TabName(TEXT("PathTracerCapture"));
 
 void FPathTracerCaptureEditorModule::StartupModule()
 {
+    ISettingsModule& SettingsModule = FModuleManager::LoadModuleChecked<ISettingsModule>(TEXT("Settings"));
+    SettingsModule.RegisterSettings(
+        TEXT("Project"),
+        TEXT("Plugins"),
+        TEXT("PathTracerCapture"),
+        FText::FromString(TEXT("PathTracerCapture")),
+        FText::FromString(TEXT("PathTracerCapture 插件设置，包括 Alpha 通道材质与映射参数。")),
+        GetMutableDefault<UPathTracerCaptureSettings>());
+
     FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
         TabName,
         FOnSpawnTab::CreateRaw(this, &FPathTracerCaptureEditorModule::SpawnPluginTab))
@@ -22,6 +33,11 @@ void FPathTracerCaptureEditorModule::StartupModule()
 
 void FPathTracerCaptureEditorModule::ShutdownModule()
 {
+    if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>(TEXT("Settings")))
+    {
+        SettingsModule->UnregisterSettings(TEXT("Project"), TEXT("Plugins"), TEXT("PathTracerCapture"));
+    }
+
     UToolMenus::UnRegisterStartupCallback(this);
     UToolMenus::UnregisterOwner(this);
 

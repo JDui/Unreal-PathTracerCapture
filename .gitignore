@@ -10,5 +10,5 @@ Saved/
 *.user
 *.log
 *.tmp
+dist/
 release/
-

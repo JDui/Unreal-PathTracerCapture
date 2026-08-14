@@ -25,6 +25,7 @@ namespace PathTracerCapture
     static const TCHAR* CVarPathTracingBackgroundAlpha = TEXT("r.PathTracing.BackgroundAlpha");
     static const TCHAR* CVarPathTracingDenoiser = TEXT("r.PathTracing.Denoiser");
     static const TCHAR* CVarHighResDelay = TEXT("r.HighResScreenshotDelay");
+    static const TCHAR* CVarScreenPercentage = TEXT("r.ScreenPercentage");
     static const TCHAR* CVarPostProcessAAQuality = TEXT("r.PostProcessAAQuality");
     static const TCHAR* CVarBloomQuality = TEXT("r.BloomQuality");
     static const TCHAR* CVarEyeAdaptationQuality = TEXT("r.EyeAdaptationQuality");
@@ -76,6 +77,58 @@ namespace PathTracerCapture
         return FFileHelper::SaveArrayToFile(CompressedData, *PngFile);
     }
 
+    static bool AveragePngFiles(
+        const TArray<FString>& PngFiles,
+        int32& OutWidth,
+        int32& OutHeight,
+        TArray64<uint8>& OutRawData)
+    {
+        if (PngFiles.Num() <= 0)
+        {
+            return false;
+        }
+
+        TArray64<uint32> SumData;
+        SumData.Reset();
+
+        for (int32 FileIndex = 0; FileIndex < PngFiles.Num(); ++FileIndex)
+        {
+            int32 Width = 0;
+            int32 Height = 0;
+            TArray64<uint8> RawData;
+            if (!DecodePngToBgra8(PngFiles[FileIndex], Width, Height, RawData))
+            {
+                return false;
+            }
+
+            if (FileIndex == 0)
+            {
+                OutWidth = Width;
+                OutHeight = Height;
+                SumData.SetNumZeroed(RawData.Num());
+            }
+            else if (Width != OutWidth || Height != OutHeight || RawData.Num() != SumData.Num())
+            {
+                return false;
+            }
+
+            for (int64 ByteIndex = 0; ByteIndex < RawData.Num(); ++ByteIndex)
+            {
+                SumData[ByteIndex] += RawData[ByteIndex];
+            }
+        }
+
+        OutRawData.SetNumUninitialized(SumData.Num());
+        const uint32 Divisor = static_cast<uint32>(PngFiles.Num());
+        const uint32 RoundingOffset = Divisor / 2;
+        for (int64 ByteIndex = 0; ByteIndex < SumData.Num(); ++ByteIndex)
+        {
+            OutRawData[ByteIndex] = static_cast<uint8>((SumData[ByteIndex] + RoundingOffset) / Divisor);
+        }
+
+        return OutWidth > 0 && OutHeight > 0 && OutRawData.Num() > 0;
+    }
+
     static FString BuildAlphaMaskFilePath(const FString& SourcePngFile, const FString& Suffix)
     {
         const FString Directory = FPaths::GetPath(SourcePngFile);
@@ -124,7 +177,11 @@ namespace PathTracerCapture
         }
     }
 
-    static bool ApplyPhotoshopLikeLevels(TArray64<uint8>& InOutMaskRawData, const uint8 InputBlack, const uint8 InputWhite, const float Gamma)
+    static bool ApplyPhotoshopLikeLevels(
+        TArray64<uint8>& InOutMaskRawData,
+        const uint8 InputBlack,
+        const uint8 InputWhite,
+        const float Gamma)
     {
         const int64 PixelCount = InOutMaskRawData.Num() / 4;
         if (PixelCount <= 0)
@@ -146,6 +203,37 @@ namespace PathTracerCapture
             Normalized = FMath::Clamp(Normalized, 0.0f, 1.0f);
             const float GammaAdjusted = FMath::Pow(Normalized, InvGamma);
             const uint8 ResultValue = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(GammaAdjusted * 255.0f), 0, 255));
+
+            if (ResultValue != SourceValue)
+            {
+                bChanged = true;
+            }
+            InOutMaskRawData[Base + 0] = ResultValue;
+            InOutMaskRawData[Base + 1] = ResultValue;
+            InOutMaskRawData[Base + 2] = ResultValue;
+            InOutMaskRawData[Base + 3] = 255;
+        }
+
+        return bChanged;
+    }
+
+    static bool ApplyPowerToMask(TArray64<uint8>& InOutMaskRawData, const float AlphaPower)
+    {
+        const int64 PixelCount = InOutMaskRawData.Num() / 4;
+        if (PixelCount <= 0)
+        {
+            return false;
+        }
+
+        const float SafePower = FMath::IsFinite(AlphaPower) ? FMath::Max(0.001f, AlphaPower) : 1.5f;
+        bool bChanged = false;
+        for (int64 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+        {
+            const int64 Base = PixelIndex * 4;
+            const uint8 SourceValue = InOutMaskRawData[Base + 0];
+            const float Normalized = static_cast<float>(SourceValue) / 255.0f;
+            const float Powered = FMath::Pow(Normalized, SafePower);
+            const uint8 ResultValue = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Powered * 255.0f), 0, 255));
 
             if (ResultValue != SourceValue)
             {
@@ -391,18 +479,52 @@ bool UPathTracerCaptureEditorSubsystem::Tick(float DeltaTime)
         return true;
     }
 
-    if (bViewportAuxiliaryAlphaCaptureRequired && !IFileManager::Get().FileExists(*PendingAuxiliaryAlphaCapturePath))
+    if (bViewportAuxiliaryAlphaCaptureRequired)
     {
+        if (PendingAuxiliaryAlphaCapturePaths.Num() != AuxiliaryAlphaCaptureCount
+            || !PendingAuxiliaryAlphaCapturePaths.IsValidIndex(ViewportAuxiliaryAlphaCaptureIndex))
+        {
+            FinishCapture(false, TEXT("辅助Alpha通道临时文件状态无效。"));
+            return true;
+        }
+
+        PendingAuxiliaryAlphaCapturePath = PendingAuxiliaryAlphaCapturePaths[ViewportAuxiliaryAlphaCaptureIndex];
         if (!bViewportAuxiliaryAlphaCaptureInProgress)
         {
             if (!StartViewportAuxiliaryAlphaCapture())
             {
                 FinishCapture(false, LastResult.ErrorMessage.IsEmpty() ? TEXT("辅助Alpha通道捕获失败。") : LastResult.ErrorMessage);
             }
+            return true;
         }
-        return true;
+
+        if (!IFileManager::Get().FileExists(*PendingAuxiliaryAlphaCapturePath)
+            || IFileManager::Get().FileSize(*PendingAuxiliaryAlphaCapturePath) <= 0)
+        {
+            return true;
+        }
+
+        // FileExists can become true before the screenshot writer has flushed a valid PNG.
+        int32 ReadyWidth = 0;
+        int32 ReadyHeight = 0;
+        TArray64<uint8> ReadyRawData;
+        if (!PathTracerCapture::DecodePngToBgra8(PendingAuxiliaryAlphaCapturePath, ReadyWidth, ReadyHeight, ReadyRawData))
+        {
+            return true;
+        }
+
+        bViewportAuxiliaryAlphaCaptureInProgress = false;
+        ++ViewportAuxiliaryAlphaCaptureIndex;
+        if (ViewportAuxiliaryAlphaCaptureIndex < AuxiliaryAlphaCaptureCount)
+        {
+            PendingAuxiliaryAlphaCapturePath = PendingAuxiliaryAlphaCapturePaths[ViewportAuxiliaryAlphaCaptureIndex];
+            SetStatus(
+                EPathTracerCapturePhase::Encoding,
+                FString::Printf(TEXT("Alpha通道采集中（%d/%d）..."), ViewportAuxiliaryAlphaCaptureIndex + 1, AuxiliaryAlphaCaptureCount),
+                ActiveRequest.TargetSPP);
+            return true;
+        }
     }
-    bViewportAuxiliaryAlphaCaptureInProgress = false;
 
     SetStatus(EPathTracerCapturePhase::Encoding, TEXT("正在编码PNG输出..."), ActiveRequest.TargetSPP);
     FString PrimaryOutputFile = PendingOutputPath;
@@ -508,11 +630,24 @@ void UPathTracerCaptureEditorSubsystem::RestoreViewportCaptureState()
     }
 
     GetHighResScreenshotConfig().SetMaskEnabled(false);
+    const float* OriginalScreenPercentage = CVarSnapshot.FloatValues.Find(PathTracerCapture::CVarScreenPercentage);
+    const bool bHadOriginalScreenPercentage = OriginalScreenPercentage != nullptr;
+    const float SavedScreenPercentage = bHadOriginalScreenPercentage ? *OriginalScreenPercentage : 0.0f;
     RestoreCVars();
-    RestoreOtherPostProcessVolumes();
-    if (!PendingAuxiliaryAlphaCapturePath.IsEmpty())
+    if (bHadOriginalScreenPercentage)
     {
-        IFileManager::Get().Delete(*PendingAuxiliaryAlphaCapturePath, false, true);
+        StatusLog.Add(FString::Printf(
+            TEXT("[信息] Alpha辅助采集结束，已恢复 r.ScreenPercentage 原值 %.3f（当前 %.3f）。"),
+            static_cast<double>(SavedScreenPercentage),
+            static_cast<double>(GetCVarFloat(PathTracerCapture::CVarScreenPercentage, SavedScreenPercentage))));
+    }
+    RestoreOtherPostProcessVolumes();
+    for (const FString& AuxiliaryCapturePath : PendingAuxiliaryAlphaCapturePaths)
+    {
+        if (!AuxiliaryCapturePath.IsEmpty())
+        {
+            IFileManager::Get().Delete(*AuxiliaryCapturePath, false, true);
+        }
     }
     if (TemporaryAlphaPostProcessVolume)
     {
@@ -527,6 +662,9 @@ void UPathTracerCaptureEditorSubsystem::RestoreViewportCaptureState()
     bViewportAuxiliaryAlphaCapturePrepared = false;
     bViewportAuxiliaryAlphaCaptureInProgress = false;
     ViewportAuxiliaryAlphaWarmupFramesRemaining = 0;
+    ViewportAuxiliaryAlphaCaptureIndex = 0;
+    bScreenPercentageRaisedForAuxiliaryCapture = false;
+    PendingAuxiliaryAlphaCapturePaths.Reset();
     PendingAuxiliaryAlphaCapturePath.Reset();
     PendingOutputPath.Reset();
     PendingOutputPrefix.Reset();
@@ -568,6 +706,9 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportCapture(const FPathTracerCa
     bViewportAuxiliaryAlphaCapturePrepared = false;
     bViewportAuxiliaryAlphaCaptureInProgress = false;
     ViewportAuxiliaryAlphaWarmupFramesRemaining = 0;
+    ViewportAuxiliaryAlphaCaptureIndex = 0;
+    bScreenPercentageRaisedForAuxiliaryCapture = false;
+    PendingAuxiliaryAlphaCapturePaths.Reset();
     PendingAuxiliaryAlphaCapturePath.Reset();
 
     if (bViewportAuxiliaryAlphaCaptureRequired)
@@ -575,9 +716,18 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportCapture(const FPathTracerCa
         const FString TempDirectory = FPaths::ProjectIntermediateDir() / TEXT("PathTracerCapture");
         IFileManager::Get().MakeDirectory(*TempDirectory, true);
         const FString Prefix = ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial ? TEXT("PostProcessAlpha") : TEXT("WorldNormal");
-        PendingAuxiliaryAlphaCapturePath =
-            TempDirectory / FString::Printf(TEXT("%s_%s.png"), *Prefix, *FGuid::NewGuid().ToString(EGuidFormats::Digits));
-        IFileManager::Get().Delete(*PendingAuxiliaryAlphaCapturePath, false, true);
+        PendingAuxiliaryAlphaCapturePaths.Reserve(AuxiliaryAlphaCaptureCount);
+        for (int32 CaptureIndex = 0; CaptureIndex < AuxiliaryAlphaCaptureCount; ++CaptureIndex)
+        {
+            const FString CapturePath = TempDirectory / FString::Printf(
+                TEXT("%s_%s_%d.png"),
+                *Prefix,
+                *FGuid::NewGuid().ToString(EGuidFormats::Digits),
+                CaptureIndex + 1);
+            PendingAuxiliaryAlphaCapturePaths.Add(CapturePath);
+            IFileManager::Get().Delete(*CapturePath, false, true);
+        }
+        PendingAuxiliaryAlphaCapturePath = PendingAuxiliaryAlphaCapturePaths[0];
 
         ViewportClient->AddRealtimeOverride(false, PathTracerCapture::GetRealtimeOverrideName());
         ViewportSnapshot.bRealtimeOverridden = true;
@@ -589,6 +739,10 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportCapture(const FPathTracerCa
     SaveCVar(PathTracerCapture::CVarPathTracingBackgroundAlpha);
     SaveCVar(PathTracerCapture::CVarPathTracingDenoiser);
     SaveCVar(PathTracerCapture::CVarHighResDelay);
+    if (Request.AlphaMode != EPathTracerCaptureAlphaMode::None)
+    {
+        SaveCVarFloat(PathTracerCapture::CVarScreenPercentage);
+    }
     if (Request.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial)
     {
         SaveCVar(PathTracerCapture::CVarPostProcessAAQuality);
@@ -620,7 +774,7 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportCapture(const FPathTracerCa
     SetStatus(
         EPathTracerCapturePhase::Accumulating,
         bViewportAuxiliaryAlphaCaptureRequired
-            ? FString::Printf(TEXT("正在开始视口路径追踪捕获（%dx%d，%d spp）。接下来将运行%s Alpha通道采集..."), Resolution.X, Resolution.Y, Request.TargetSPP, ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial ? TEXT("后处理") : TEXT("世界法线"))
+            ? FString::Printf(TEXT("正在开始视口路径追踪捕获（%dx%d，%d spp）。接下来将运行%s Alpha通道采集..."), Resolution.X, Resolution.Y, Request.TargetSPP, ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial ? TEXT("场景Alpha通道") : TEXT("世界法线"))
             : FString::Printf(TEXT("正在开始视口路径追踪捕获（%dx%d，%d spp）..."), Resolution.X, Resolution.Y, Request.TargetSPP),
         0);
 
@@ -647,6 +801,17 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
         return false;
     }
 
+    // Auxiliary captures render at 105% screen percentage while preserving the requested PNG size.
+    if (!bScreenPercentageRaisedForAuxiliaryCapture)
+    {
+        const float OriginalScreenPercentage = GetCVarFloat(PathTracerCapture::CVarScreenPercentage, 100.0f);
+        SetCVarFloat(PathTracerCapture::CVarScreenPercentage, 105.0f);
+        StatusLog.Add(FString::Printf(
+            TEXT("[信息] Alpha辅助采集将 r.ScreenPercentage 从 %.3f 提高到 105.000；结束时恢复原值。"),
+            static_cast<double>(OriginalScreenPercentage)));
+        bScreenPercentageRaisedForAuxiliaryCapture = true;
+    }
+
     if (ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial)
     {
         if (!bViewportAuxiliaryAlphaCapturePrepared)
@@ -660,7 +825,7 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
             if (!TemporaryAlphaPostProcessMaterial)
             {
                 LastResult.ErrorMessage = FString::Printf(
-                    TEXT("无法加载Alpha后处理材质：%s。请设置有效的材质资源路径。"),
+                    TEXT("无法加载场景Alpha通道材质：%s。请在项目设置中设置有效的材质资源路径。"),
                     *MaterialPath.ToString());
                 return false;
             }
@@ -668,7 +833,7 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
             UWorld* WorldForAlphaCapture = ResolveCaptureWorld();
             if (!WorldForAlphaCapture)
             {
-                LastResult.ErrorMessage = TEXT("Alpha后处理捕获所需的捕获世界不可用。");
+                LastResult.ErrorMessage = TEXT("场景Alpha通道捕获所需的捕获世界不可用。");
                 return false;
             }
 
@@ -709,8 +874,8 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
             ViewportSnapshot.Client->ChangeBufferVisualizationMode(NAME_None);
             ViewportSnapshot.Client->SetViewMode(VMI_Lit);
             ViewportSnapshot.Client->Invalidate();
-            StatusLog.Add(FString::Printf(TEXT("[信息] 后处理Alpha采集世界：%s"), *WorldForAlphaCapture->GetName()));
-            StatusLog.Add(TEXT("[信息] 已强制后处理Alpha通道设置：EyeAdaptation=0、LocalExposure=0、AA/Bloom/DOF/MotionBlur/LensFlare/Fringe=0。"));
+            StatusLog.Add(FString::Printf(TEXT("[信息] 场景Alpha通道采集世界：%s"), *WorldForAlphaCapture->GetName()));
+            StatusLog.Add(TEXT("[信息] 已强制场景Alpha通道设置：EyeAdaptation=0、LocalExposure=0、AA/Bloom/DOF/MotionBlur/LensFlare/Fringe=0。"));
             UpdatedEvent.Broadcast();
 
             bViewportAuxiliaryAlphaCapturePrepared = true;
@@ -722,7 +887,7 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
         if (ViewportAuxiliaryAlphaWarmupFramesRemaining > 0)
         {
             --ViewportAuxiliaryAlphaWarmupFramesRemaining;
-            SetStatus(EPathTracerCapturePhase::Encoding, TEXT("后处理Alpha通道已预热，正在捕获下一帧..."), ActiveRequest.TargetSPP);
+            SetStatus(EPathTracerCapturePhase::Encoding, TEXT("场景Alpha通道已预热，正在捕获下一帧..."), ActiveRequest.TargetSPP);
             return true;
         }
     }
@@ -745,7 +910,7 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
     SetStatus(
         EPathTracerCapturePhase::Encoding,
         ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial
-            ? TEXT("正在捕获后处理Alpha通道...")
+            ? TEXT("正在捕获场景Alpha通道...")
             : TEXT("正在捕获世界法线通道以合成Alpha..."),
         ActiveRequest.TargetSPP);
     if (!ViewportSnapshot.Viewport->TakeHighResScreenShot())
@@ -775,9 +940,9 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
         return false;
     }
 
-    if (PendingAuxiliaryAlphaCapturePath.IsEmpty() || !IFileManager::Get().FileExists(*PendingAuxiliaryAlphaCapturePath))
+    if (PendingAuxiliaryAlphaCapturePaths.Num() != AuxiliaryAlphaCaptureCount)
     {
-        StatusLog.Add(TEXT("[错误] 未找到辅助Alpha捕获文件。"));
+        StatusLog.Add(TEXT("[错误] 未找到完整的辅助Alpha捕获文件堆栈。"));
         UpdatedEvent.Broadcast();
         return false;
     }
@@ -785,9 +950,9 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
     int32 AuxWidth = 0;
     int32 AuxHeight = 0;
     TArray64<uint8> AuxRawData;
-    if (!PathTracerCapture::DecodePngToBgra8(PendingAuxiliaryAlphaCapturePath, AuxWidth, AuxHeight, AuxRawData))
+    if (!PathTracerCapture::AveragePngFiles(PendingAuxiliaryAlphaCapturePaths, AuxWidth, AuxHeight, AuxRawData))
     {
-        StatusLog.Add(TEXT("[错误] 辅助Alpha捕获解码失败。"));
+        StatusLog.Add(TEXT("[错误] 辅助Alpha三帧堆栈平均失败。"));
         UpdatedEvent.Broadcast();
         return false;
     }
@@ -798,6 +963,9 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
         UpdatedEvent.Broadcast();
         return false;
     }
+
+    StatusLog.Add(FString::Printf(TEXT("[信息] 已完成辅助Alpha三帧逐像素堆栈平均（%dx%d），即将进入掩码与映射。"), AuxWidth, AuxHeight));
+    UpdatedEvent.Broadcast();
 
     TArray64<uint8> MaskRawData;
     if (ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial)
@@ -814,21 +982,26 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
         constexpr uint8 LevelsInputBlack = 0;
         constexpr uint8 LevelsInputWhite = 210;
         constexpr float LevelsGamma = 1.0f;
-        const bool bRemapped = PathTracerCapture::ApplyPhotoshopLikeLevels(MaskRawData, LevelsInputBlack, LevelsInputWhite, LevelsGamma);
-        if (bRemapped)
-        {
-            StatusLog.Add(
-                FString::Printf(
-                    TEXT("[信息] 已使用 Levels（输入黑=%d、伽马=%.2f、输入白=%d）重映射Alpha。"),
-                    static_cast<int32>(LevelsInputBlack),
-                    static_cast<double>(LevelsGamma),
-                    static_cast<int32>(LevelsInputWhite)));
-            UpdatedEvent.Broadcast();
-        }
+        const bool bLevelsChanged = PathTracerCapture::ApplyPhotoshopLikeLevels(
+            MaskRawData,
+            LevelsInputBlack,
+            LevelsInputWhite,
+            LevelsGamma);
+        const bool bPowerChanged = PathTracerCapture::ApplyPowerToMask(MaskRawData, ActiveRequest.AlphaPower);
+        StatusLog.Add(
+            FString::Printf(
+                TEXT("[信息] Alpha映射顺序：先 Levels（输入黑=%d、输入白=%d、伽马=%.2f，%s），再 Power=%.3f（%s）。"),
+                static_cast<int32>(LevelsInputBlack),
+                static_cast<int32>(LevelsInputWhite),
+                static_cast<double>(LevelsGamma),
+                bLevelsChanged ? TEXT("已变更") : TEXT("结果不变"),
+                static_cast<double>(ActiveRequest.AlphaPower),
+                bPowerChanged ? TEXT("已变更") : TEXT("结果不变")));
+        UpdatedEvent.Broadcast();
     }
     else
     {
-        StatusLog.Add(TEXT("[信息] 已启用原始Alpha：跳过 Levels 重映射。"));
+        StatusLog.Add(TEXT("[信息] 已启用原始Alpha：跳过 Levels 和 Power 重映射。"));
         UpdatedEvent.Broadcast();
     }
 
@@ -842,7 +1015,7 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
 
         StatusLog.Add(
             ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial
-                ? TEXT("[信息] 已将后处理Alpha通道合并到RGBA输出。")
+                ? TEXT("[信息] 已将场景Alpha通道合并到RGBA输出。")
                 : TEXT("[信息] 已将世界法线二值掩码合并到RGBA输出。"));
         UpdatedEvent.Broadcast();
         return true;
@@ -939,13 +1112,29 @@ void UPathTracerCaptureEditorSubsystem::SaveCVar(const FString& Name)
     }
 }
 
+void UPathTracerCaptureEditorSubsystem::SaveCVarFloat(const FString& Name)
+{
+    if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(*Name))
+    {
+        if (!CVarSnapshot.FloatValues.Contains(Name))
+        {
+            CVarSnapshot.FloatValues.Add(Name, Var->GetFloat());
+        }
+    }
+}
+
 void UPathTracerCaptureEditorSubsystem::RestoreCVars()
 {
     for (const TPair<FString, int32>& Pair : CVarSnapshot.IntValues)
     {
         SetCVarInt(Pair.Key, Pair.Value);
     }
+    for (const TPair<FString, float>& Pair : CVarSnapshot.FloatValues)
+    {
+        SetCVarFloat(Pair.Key, Pair.Value);
+    }
     CVarSnapshot.IntValues.Reset();
+    CVarSnapshot.FloatValues.Reset();
 }
 
 int32 UPathTracerCaptureEditorSubsystem::GetCVarInt(const FString& Name, int32 DefaultValue) const
@@ -958,6 +1147,23 @@ int32 UPathTracerCaptureEditorSubsystem::GetCVarInt(const FString& Name, int32 D
 }
 
 void UPathTracerCaptureEditorSubsystem::SetCVarInt(const FString& Name, int32 Value) const
+{
+    if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(*Name))
+    {
+        Var->Set(Value, ECVF_SetByCode);
+    }
+}
+
+float UPathTracerCaptureEditorSubsystem::GetCVarFloat(const FString& Name, float DefaultValue) const
+{
+    if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(*Name))
+    {
+        return Var->GetFloat();
+    }
+    return DefaultValue;
+}
+
+void UPathTracerCaptureEditorSubsystem::SetCVarFloat(const FString& Name, float Value) const
 {
     if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(*Name))
     {

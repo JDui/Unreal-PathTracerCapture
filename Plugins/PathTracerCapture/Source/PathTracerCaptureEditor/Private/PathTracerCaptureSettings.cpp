@@ -32,6 +32,7 @@ void UPathTracerCaptureSettings::ResetToDefaults()
     AlphaSource = EPathTracerCaptureAlphaSource::PostProcessMaterial;
     AlphaPostProcessMaterial = GetDefaultAlphaPostProcessMaterialPath();
     bUseRawAlphaMask = false;
+    AlphaPower = 1.5f;
 }
 
 FPathTracerCaptureRequest UPathTracerCaptureSettings::MakeRequest() const
@@ -55,5 +56,6 @@ FPathTracerCaptureRequest UPathTracerCaptureSettings::MakeRequest() const
         Request.AlphaPostProcessMaterial = AlphaPostProcessMaterial;
     }
     Request.bUseRawAlphaMask = bUseRawAlphaMask;
+    Request.AlphaPower = AlphaPower;
     return Request;
 }

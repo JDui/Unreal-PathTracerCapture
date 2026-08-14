@@ -40,7 +40,7 @@ public:
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha模式", ToolTip = "是否输出透明通道：无Alpha / 合并Alpha到RGBA / 分离Alpha贴图。"))
     EPathTracerCaptureAlphaMode AlphaMode = EPathTracerCaptureAlphaMode::None;
 
-    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha来源", ToolTip = "Alpha通道的来源：世界法线二值掩码 或 后处理材质输出。"))
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha来源", ToolTip = "Alpha通道的来源：世界法线二值掩码或场景Alpha通道。"))
     EPathTracerCaptureAlphaSource AlphaSource = EPathTracerCaptureAlphaSource::PostProcessMaterial;
 
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "透明通道后处理材质", ToolTip = "用于输出透明通道的后处理材质，可点击【预热Alpha通道】提前加载以避免首次渲染卡顿。", AllowedClasses = "/Script/Engine.MaterialInterface"))
@@ -48,6 +48,9 @@ public:
 
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "原始Alpha（跳过重映射）", ToolTip = "启用后跳过Alpha Levels 重映射，直接使用原始掩码值。"))
     bool bUseRawAlphaMask = false;
+
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha Power", ToolTip = "Levels 重映射完成后应用的幂次；界面建议范围为 0.5~2，可手动输入范围外数值。", UIMin = "0.5", UIMax = "2.0"))
+    float AlphaPower = 1.5f;
 
     FPathTracerCaptureRequest MakeRequest() const;
 };
