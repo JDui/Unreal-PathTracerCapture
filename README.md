@@ -1,17 +1,72 @@
-# PathTracerCaptureHost
+# AXi_PathTracerCapture
 
-Unreal Engine 5.5 host project for the `PathTracerCapture` plugin.
+Unreal Engine 5.5 编辑器插件：捕获视口路径追踪渲染的 PNG 帧，支持可选的透明通道合成输出。全中文界面。
 
-## Contents
+## 功能特色
 
-- `Source/PathTracerCaptureHost` - host runtime module
-- `Plugins/PathTracerCapture` - editor plugin and content
-- `Config/` - project and plugin config
-- `Content/` - project content
-- `Ref/` - reference assets
+- **视口路径追踪捕获**：一键在编辑器中按目标采样数（SPP）累积渲染当前视口，输出 PNG；渲染完成后自动恢复视口模式与相关渲染设置，不打扰原有工作流。
+- **灵活的分辨率与采样控制**：独立设置输出分辨率（16～16384）与目标 SPP（1～8192），视口可自动按目标分辨率采集。
+- **透明通道输出**：
+  - 三种 Alpha 模式：**无 Alpha**（不透明 RGB）、**合并 Alpha 到 RGBA**（单张含透明通道的 PNG）、**分离 Alpha 贴图**（额外输出一张独立 Alpha 图）。
+  - 两种 Alpha 来源：**世界法线二值掩码**（按朝向生成掩码）与**场景 Alpha 通道**（通过后处理材质采集）。
+  - **Alpha Levels 重映射**：可调 Alpha Power 幂次曲线微调透明度过渡，也可直接使用原始掩码跳过重映射。
+- **Alpha 抗锯齿**：独立设置 Alpha 辅助通道的屏幕采样百分比与堆栈张数，获得更平滑的 Alpha 边缘。
+- **可选的路径追踪降噪器**：在较低采样数下得到更干净的结果。
+- **灵活的命名规则**：文件名支持 `{date}` `{seq}` `{map}` `{backend}` `{spp}` `{timestamp}` 等占位符，自动避免覆盖。
+- **Alpha 通道预热**：一键提前加载透明通道后处理材质、触发着色器编译（完成后自动释放引用），避免正式渲染时的首次卡顿。
+- **实时状态反馈**：面板实时显示渲染阶段（准备中 / 累积中 / 编码中 / 完成 / 失败 / 已取消）、当前采样进度与完整操作日志，随时可取消。
+- **便捷入口**：一键打开输出文件夹；设置自动保存，下次打开编辑器保留上次配置；项目设置（插件 → PathTracerCapture）中亦可修改。
+- **蓝图可调用**：提供开发期蓝图节点（开始捕获 / 取消捕获 / 查询进度 / 获取结果），可用于自动化批处理。
 
-## Notes
+## 使用指南
 
-- Generated build output stays ignored via `.gitignore`
-- Project targets Unreal Engine 5.5
+### 基本流程
 
+1. 在编辑器中打开目标关卡，将视口切换到 **路径追踪** 视图模式（Path Tracing），并把该视口设为当前活动视口。
+2. 打开插件面板：菜单栏 **窗口 → AXi_PathTracerCapture**。
+3. 配置参数（见下表）。
+4. 点击 **渲染并保存**，等待渲染完成。
+5. 点击 **打开输出文件夹** 查看输出的 PNG。
+
+> 提示：首次使用透明通道输出时，建议先点击 **预热Alpha通道**，再正式渲染，可避免第一次渲染时的材质编译卡顿。
+
+### 参数说明
+
+| 参数 | 说明 |
+| --- | --- |
+| 分辨率 X / Y | 输出图像宽高（像素，16～16384）。 |
+| 目标采样数 (SPP) | 路径追踪目标每像素采样数；越高画面越干净，耗时越长。 |
+| 输出目录 | 渲染结果的保存目录。 |
+| 文件名格式 | 输出文件名模板，支持 `{date}`（日期）、`{seq}`（序号）、`{map}`（关卡名）、`{backend}`（后端）、`{spp}`（采样数）、`{timestamp}`（时间戳）。 |
+| 启用降噪器 | 开启路径追踪降噪器，低采样数下更干净。 |
+| Alpha模式 | 无 Alpha / 合并 Alpha 到 RGBA / 分离 Alpha 贴图。 |
+| Alpha来源 | 世界法线二值掩码，或场景 Alpha 通道（后处理材质采集）。 |
+| 透明通道后处理材质 | Alpha 来源为"场景 Alpha 通道"时使用的材质，内置默认材质，可替换。 |
+| 原始Alpha（跳过重映射） | 开启后直接使用原始掩码值，跳过 Alpha Levels 重映射。 |
+| Alpha Power | 重映射完成后应用的幂次，调节透明度过渡的锐度（界面建议 0.5～2.0）。 |
+| Alpha辅助屏幕采样百分比 | 采集 Alpha 辅助通道时的屏幕采样百分比，越高边缘越精细。 |
+| Alpha堆栈张数 | 采集 Alpha 辅助通道时的堆栈帧数，用于改善边缘抗锯齿。 |
+
+### 蓝图自动化
+
+在蓝图（开发期）中可通过 `PathTracerCapture` 分类下的节点调用：
+
+- `Start PathTracer Capture`：按请求结构体发起捕获；
+- `Cancel PathTracer Capture`：取消当前捕获；
+- `Get Capture Progress`：查询阶段与采样进度；
+- `Get Last Capture Result`：获取最近一次捕获结果（成功与否、输出文件、耗时）。
+
+## 目录结构
+
+- `Source/PathTracerCaptureHost` — 宿主运行时模块
+- `Plugins/PathTracerCapture` — 编辑器插件本体（代码与内容）
+- `Config/` — 项目与插件配置
+- `Content/` — 项目内容
+- `Ref/` — 参考资产
+- `Scripts/` — 打包脚本
+- `dist/` — 预构建的插件发行包（UE 5.5 / UE 5.8）
+
+## 兼容性
+
+- 目标引擎：Unreal Engine 5.5（另附 UE 5.8 预构建包）。
+- 依赖项目启用路径追踪渲染（Path Tracing）。
