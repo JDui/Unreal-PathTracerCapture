@@ -33,6 +33,8 @@ void UPathTracerCaptureSettings::ResetToDefaults()
     AlphaPostProcessMaterial = GetDefaultAlphaPostProcessMaterialPath();
     bUseRawAlphaMask = false;
     AlphaPower = 1.5f;
+    AlphaAuxiliaryScreenPercentage = 110.0f;
+    AlphaStackSampleCount = 4;
 }
 
 FPathTracerCaptureRequest UPathTracerCaptureSettings::MakeRequest() const
@@ -57,5 +59,7 @@ FPathTracerCaptureRequest UPathTracerCaptureSettings::MakeRequest() const
     }
     Request.bUseRawAlphaMask = bUseRawAlphaMask;
     Request.AlphaPower = AlphaPower;
+    Request.AlphaAuxiliaryScreenPercentage = AlphaAuxiliaryScreenPercentage;
+    Request.AlphaStackSampleCount = AlphaStackSampleCount;
     return Request;
 }

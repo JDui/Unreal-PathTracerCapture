@@ -52,5 +52,11 @@ public:
     UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha Power", ToolTip = "Levels 重映射完成后应用的幂次；界面建议范围为 0.5~2，可手动输入范围外数值。", UIMin = "0.5", UIMax = "2.0"))
     float AlphaPower = 1.5f;
 
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Alpha Anti-Aliasing", meta = (DisplayName = "Alpha辅助屏幕采样百分比", ToolTip = "采集Alpha辅助通道时使用的屏幕采样百分比。", ClampMin = "25.0", ClampMax = "400.0", UIMin = "100.0", UIMax = "200.0"))
+    float AlphaAuxiliaryScreenPercentage = 110.0f;
+
+    UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "Alpha Anti-Aliasing", meta = (DisplayName = "Alpha堆栈张数", ToolTip = "采集Alpha辅助通道时使用的堆栈帧数。", ClampMin = "1", ClampMax = "64", UIMin = "1", UIMax = "16"))
+    int32 AlphaStackSampleCount = 4;
+
     FPathTracerCaptureRequest MakeRequest() const;
 };

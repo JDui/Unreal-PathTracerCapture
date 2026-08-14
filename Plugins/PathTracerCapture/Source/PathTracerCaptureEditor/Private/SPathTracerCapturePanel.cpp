@@ -368,6 +368,12 @@ bool SPathTracerCapturePanel::IsSettingsPropertyVisible(const FPropertyAndParent
         return false;
     }
 
+    if (PropertyAndParent.Property.GetFName() == GET_MEMBER_NAME_CHECKED(UPathTracerCaptureSettings, AlphaAuxiliaryScreenPercentage)
+        || PropertyAndParent.Property.GetFName() == GET_MEMBER_NAME_CHECKED(UPathTracerCaptureSettings, AlphaStackSampleCount))
+    {
+        return false;
+    }
+
     if (PropertyAndParent.Property.GetFName() == GET_MEMBER_NAME_CHECKED(UPathTracerCaptureSettings, AlphaSource))
     {
         const UPathTracerCaptureSettings* Settings = GetDefault<UPathTracerCaptureSettings>();

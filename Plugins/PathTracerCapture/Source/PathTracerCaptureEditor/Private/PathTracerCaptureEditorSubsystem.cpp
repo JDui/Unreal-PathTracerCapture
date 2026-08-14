@@ -77,26 +77,32 @@ namespace PathTracerCapture
         return FFileHelper::SaveArrayToFile(CompressedData, *PngFile);
     }
 
-    static bool AveragePngFiles(
+    static bool BuildAveragedMaskFromPngFiles(
         const TArray<FString>& PngFiles,
+        const EPathTracerCaptureAlphaSource AlphaSource,
         int32& OutWidth,
         int32& OutHeight,
         TArray64<uint8>& OutRawData)
     {
+        OutWidth = 0;
+        OutHeight = 0;
+        OutRawData.Reset();
         if (PngFiles.Num() <= 0)
         {
             return false;
         }
 
-        TArray64<uint32> SumData;
-        SumData.Reset();
-
+        TArray64<uint32> SumMaskValues;
         for (int32 FileIndex = 0; FileIndex < PngFiles.Num(); ++FileIndex)
         {
             int32 Width = 0;
             int32 Height = 0;
             TArray64<uint8> RawData;
-            if (!DecodePngToBgra8(PngFiles[FileIndex], Width, Height, RawData))
+            if (!DecodePngToBgra8(PngFiles[FileIndex], Width, Height, RawData)
+                || Width <= 0
+                || Height <= 0
+                || RawData.Num() <= 0
+                || (RawData.Num() % 4) != 0)
             {
                 return false;
             }
@@ -105,25 +111,56 @@ namespace PathTracerCapture
             {
                 OutWidth = Width;
                 OutHeight = Height;
-                SumData.SetNumZeroed(RawData.Num());
+                SumMaskValues.SetNumZeroed(static_cast<int64>(Width) * static_cast<int64>(Height));
             }
-            else if (Width != OutWidth || Height != OutHeight || RawData.Num() != SumData.Num())
+            else if (Width != OutWidth
+                || Height != OutHeight
+                || RawData.Num() != static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight) * 4)
             {
                 return false;
             }
 
-            for (int64 ByteIndex = 0; ByteIndex < RawData.Num(); ++ByteIndex)
+            const int64 PixelCount = static_cast<int64>(Width) * static_cast<int64>(Height);
+            if (RawData.Num() != PixelCount * 4 || SumMaskValues.Num() != PixelCount)
             {
-                SumData[ByteIndex] += RawData[ByteIndex];
+                return false;
+            }
+
+            // Convert each frame to a scalar mask before averaging. This preserves
+            // per-frame coverage for WorldNormal edges instead of averaging RGB and
+            // then collapsing the result to a binary value.
+            for (int64 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
+            {
+                const int64 Base = PixelIndex * 4;
+                uint8 MaskValue = 0;
+                if (AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial)
+                {
+                    // PNG is decoded as BGRA; the post-process alpha material writes R.
+                    MaskValue = RawData[Base + 2];
+                }
+                else
+                {
+                    const bool bIsBlack = RawData[Base + 0] == 0
+                        && RawData[Base + 1] == 0
+                        && RawData[Base + 2] == 0;
+                    MaskValue = bIsBlack ? 0 : 255;
+                }
+                SumMaskValues[PixelIndex] += MaskValue;
             }
         }
 
-        OutRawData.SetNumUninitialized(SumData.Num());
         const uint32 Divisor = static_cast<uint32>(PngFiles.Num());
         const uint32 RoundingOffset = Divisor / 2;
-        for (int64 ByteIndex = 0; ByteIndex < SumData.Num(); ++ByteIndex)
+        const int64 PixelCount = SumMaskValues.Num();
+        OutRawData.SetNumUninitialized(PixelCount * 4);
+        for (int64 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
         {
-            OutRawData[ByteIndex] = static_cast<uint8>((SumData[ByteIndex] + RoundingOffset) / Divisor);
+            const uint8 AverageValue = static_cast<uint8>((SumMaskValues[PixelIndex] + RoundingOffset) / Divisor);
+            const int64 Base = PixelIndex * 4;
+            OutRawData[Base + 0] = AverageValue;
+            OutRawData[Base + 1] = AverageValue;
+            OutRawData[Base + 2] = AverageValue;
+            OutRawData[Base + 3] = 255;
         }
 
         return OutWidth > 0 && OutHeight > 0 && OutRawData.Num() > 0;
@@ -134,37 +171,6 @@ namespace PathTracerCapture
         const FString Directory = FPaths::GetPath(SourcePngFile);
         const FString BaseName = FPaths::GetBaseFilename(SourcePngFile);
         return Directory / (BaseName + Suffix + TEXT(".png"));
-    }
-
-    static void BuildBinaryMaskFromWorldNormal(const TArray64<uint8>& WorldNormalRawData, TArray64<uint8>& OutMaskRawData)
-    {
-        OutMaskRawData.SetNumUninitialized(WorldNormalRawData.Num());
-        const int64 PixelCount = WorldNormalRawData.Num() / 4;
-        for (int64 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
-        {
-            const int64 Base = PixelIndex * 4;
-            const bool bIsBlack = WorldNormalRawData[Base + 0] == 0 && WorldNormalRawData[Base + 1] == 0 && WorldNormalRawData[Base + 2] == 0;
-            const uint8 MaskValue = bIsBlack ? 0 : 255;
-            OutMaskRawData[Base + 0] = MaskValue;
-            OutMaskRawData[Base + 1] = MaskValue;
-            OutMaskRawData[Base + 2] = MaskValue;
-            OutMaskRawData[Base + 3] = 255;
-        }
-    }
-
-    static void BuildMaskFromPostProcessAlphaPass(const TArray64<uint8>& PostProcessRawData, TArray64<uint8>& OutMaskRawData)
-    {
-        OutMaskRawData.SetNumUninitialized(PostProcessRawData.Num());
-        const int64 PixelCount = PostProcessRawData.Num() / 4;
-        for (int64 PixelIndex = 0; PixelIndex < PixelCount; ++PixelIndex)
-        {
-            const int64 Base = PixelIndex * 4;
-            const uint8 MaskValue = PostProcessRawData[Base + 0];
-            OutMaskRawData[Base + 0] = MaskValue;
-            OutMaskRawData[Base + 1] = MaskValue;
-            OutMaskRawData[Base + 2] = MaskValue;
-            OutMaskRawData[Base + 3] = 255;
-        }
     }
 
     static void ApplyMaskToMainAlpha(TArray64<uint8>& InOutMainRawData, const TArray64<uint8>& MaskRawData)
@@ -481,7 +487,7 @@ bool UPathTracerCaptureEditorSubsystem::Tick(float DeltaTime)
 
     if (bViewportAuxiliaryAlphaCaptureRequired)
     {
-        if (PendingAuxiliaryAlphaCapturePaths.Num() != AuxiliaryAlphaCaptureCount
+        if (PendingAuxiliaryAlphaCapturePaths.Num() != ActiveRequest.AlphaStackSampleCount
             || !PendingAuxiliaryAlphaCapturePaths.IsValidIndex(ViewportAuxiliaryAlphaCaptureIndex))
         {
             FinishCapture(false, TEXT("辅助Alpha通道临时文件状态无效。"));
@@ -515,12 +521,12 @@ bool UPathTracerCaptureEditorSubsystem::Tick(float DeltaTime)
 
         bViewportAuxiliaryAlphaCaptureInProgress = false;
         ++ViewportAuxiliaryAlphaCaptureIndex;
-        if (ViewportAuxiliaryAlphaCaptureIndex < AuxiliaryAlphaCaptureCount)
+        if (ViewportAuxiliaryAlphaCaptureIndex < ActiveRequest.AlphaStackSampleCount)
         {
             PendingAuxiliaryAlphaCapturePath = PendingAuxiliaryAlphaCapturePaths[ViewportAuxiliaryAlphaCaptureIndex];
             SetStatus(
                 EPathTracerCapturePhase::Encoding,
-                FString::Printf(TEXT("Alpha通道采集中（%d/%d）..."), ViewportAuxiliaryAlphaCaptureIndex + 1, AuxiliaryAlphaCaptureCount),
+                FString::Printf(TEXT("Alpha通道采集中（%d/%d）..."), ViewportAuxiliaryAlphaCaptureIndex + 1, ActiveRequest.AlphaStackSampleCount),
                 ActiveRequest.TargetSPP);
             return true;
         }
@@ -541,15 +547,36 @@ bool UPathTracerCaptureEditorSubsystem::Tick(float DeltaTime)
 
 bool UPathTracerCaptureEditorSubsystem::ValidateRequest(const FPathTracerCaptureRequest& Request, FString& OutError) const
 {
-    if (Request.ResolutionX < 16 || Request.ResolutionY < 16)
+    if (Request.ResolutionX < 16 || Request.ResolutionY < 16
+        || Request.ResolutionX > 16384 || Request.ResolutionY > 16384)
     {
         OutError = TEXT("分辨率不能小于16x16。");
         return false;
     }
 
-    if (Request.TargetSPP <= 0)
+    if (Request.TargetSPP <= 0 || Request.TargetSPP > 8192)
     {
         OutError = TEXT("目标采样数（TargetSPP）必须大于0。");
+        return false;
+    }
+
+    if (!FMath::IsFinite(Request.AlphaAuxiliaryScreenPercentage)
+        || Request.AlphaAuxiliaryScreenPercentage < 25.0f
+        || Request.AlphaAuxiliaryScreenPercentage > 400.0f)
+    {
+        OutError = TEXT("Alpha辅助屏幕采样百分比必须是25到400之间的有限数值。");
+        return false;
+    }
+
+    if (Request.AlphaStackSampleCount < 1 || Request.AlphaStackSampleCount > 64)
+    {
+        OutError = TEXT("Alpha堆栈张数必须在1到64之间。");
+        return false;
+    }
+
+    if (!FMath::IsFinite(Request.AlphaPower) || Request.AlphaPower <= 0.0f)
+    {
+        OutError = TEXT("Alpha Power必须是大于0的有限数值。");
         return false;
     }
 
@@ -716,8 +743,8 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportCapture(const FPathTracerCa
         const FString TempDirectory = FPaths::ProjectIntermediateDir() / TEXT("PathTracerCapture");
         IFileManager::Get().MakeDirectory(*TempDirectory, true);
         const FString Prefix = ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial ? TEXT("PostProcessAlpha") : TEXT("WorldNormal");
-        PendingAuxiliaryAlphaCapturePaths.Reserve(AuxiliaryAlphaCaptureCount);
-        for (int32 CaptureIndex = 0; CaptureIndex < AuxiliaryAlphaCaptureCount; ++CaptureIndex)
+        PendingAuxiliaryAlphaCapturePaths.Reserve(ActiveRequest.AlphaStackSampleCount);
+        for (int32 CaptureIndex = 0; CaptureIndex < ActiveRequest.AlphaStackSampleCount; ++CaptureIndex)
         {
             const FString CapturePath = TempDirectory / FString::Printf(
                 TEXT("%s_%s_%d.png"),
@@ -801,14 +828,16 @@ bool UPathTracerCaptureEditorSubsystem::StartViewportAuxiliaryAlphaCapture()
         return false;
     }
 
-    // Auxiliary captures render at 105% screen percentage while preserving the requested PNG size.
+    // Auxiliary captures render at the configured screen percentage while preserving the requested PNG size.
     if (!bScreenPercentageRaisedForAuxiliaryCapture)
     {
         const float OriginalScreenPercentage = GetCVarFloat(PathTracerCapture::CVarScreenPercentage, 100.0f);
-        SetCVarFloat(PathTracerCapture::CVarScreenPercentage, 105.0f);
+        const float AuxiliaryScreenPercentage = ActiveRequest.AlphaAuxiliaryScreenPercentage;
+        SetCVarFloat(PathTracerCapture::CVarScreenPercentage, AuxiliaryScreenPercentage);
         StatusLog.Add(FString::Printf(
-            TEXT("[信息] Alpha辅助采集将 r.ScreenPercentage 从 %.3f 提高到 105.000；结束时恢复原值。"),
-            static_cast<double>(OriginalScreenPercentage)));
+            TEXT("[信息] Alpha辅助采集将 r.ScreenPercentage 从 %.3f 提高到 %.3f；结束时恢复原值。"),
+            static_cast<double>(OriginalScreenPercentage),
+            static_cast<double>(AuxiliaryScreenPercentage)));
         bScreenPercentageRaisedForAuxiliaryCapture = true;
     }
 
@@ -940,7 +969,7 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
         return false;
     }
 
-    if (PendingAuxiliaryAlphaCapturePaths.Num() != AuxiliaryAlphaCaptureCount)
+    if (PendingAuxiliaryAlphaCapturePaths.Num() != ActiveRequest.AlphaStackSampleCount)
     {
         StatusLog.Add(TEXT("[错误] 未找到完整的辅助Alpha捕获文件堆栈。"));
         UpdatedEvent.Broadcast();
@@ -950,9 +979,14 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
     int32 AuxWidth = 0;
     int32 AuxHeight = 0;
     TArray64<uint8> AuxRawData;
-    if (!PathTracerCapture::AveragePngFiles(PendingAuxiliaryAlphaCapturePaths, AuxWidth, AuxHeight, AuxRawData))
+    if (!PathTracerCapture::BuildAveragedMaskFromPngFiles(
+        PendingAuxiliaryAlphaCapturePaths,
+        ActiveRequest.AlphaSource,
+        AuxWidth,
+        AuxHeight,
+        AuxRawData))
     {
-        StatusLog.Add(TEXT("[错误] 辅助Alpha三帧堆栈平均失败。"));
+        StatusLog.Add(FString::Printf(TEXT("[错误] 辅助Alpha%d帧堆栈平均失败。"), ActiveRequest.AlphaStackSampleCount));
         UpdatedEvent.Broadcast();
         return false;
     }
@@ -964,18 +998,12 @@ bool UPathTracerCaptureEditorSubsystem::FinalizeAlphaOutput(const FString& Sourc
         return false;
     }
 
-    StatusLog.Add(FString::Printf(TEXT("[信息] 已完成辅助Alpha三帧逐像素堆栈平均（%dx%d），即将进入掩码与映射。"), AuxWidth, AuxHeight));
+    StatusLog.Add(FString::Printf(TEXT("[信息] 已完成辅助Alpha%d帧逐像素堆栈平均（%dx%d），即将进入掩码与映射。"), ActiveRequest.AlphaStackSampleCount, AuxWidth, AuxHeight));
     UpdatedEvent.Broadcast();
 
-    TArray64<uint8> MaskRawData;
-    if (ActiveRequest.AlphaSource == EPathTracerCaptureAlphaSource::PostProcessMaterial)
-    {
-        PathTracerCapture::BuildMaskFromPostProcessAlphaPass(AuxRawData, MaskRawData);
-    }
-    else
-    {
-        PathTracerCapture::BuildBinaryMaskFromWorldNormal(AuxRawData, MaskRawData);
-    }
+    // BuildAveragedMaskFromPngFiles already converts each frame into a scalar
+    // mask before averaging, preserving partial coverage at WorldNormal edges.
+    TArray64<uint8>& MaskRawData = AuxRawData;
 
     if (!ActiveRequest.bUseRawAlphaMask)
     {

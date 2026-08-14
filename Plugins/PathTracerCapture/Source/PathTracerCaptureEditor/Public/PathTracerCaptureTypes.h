@@ -78,6 +78,12 @@ struct FPathTracerCaptureRequest
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Capture", meta = (DisplayName = "Alpha Power", UIMin = "0.5", UIMax = "2.0"))
     float AlphaPower = 1.5f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Alpha Anti-Aliasing", meta = (DisplayName = "Alpha辅助屏幕采样百分比", ClampMin = "25.0", ClampMax = "400.0", UIMin = "100.0", UIMax = "200.0"))
+    float AlphaAuxiliaryScreenPercentage = 110.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Alpha Anti-Aliasing", meta = (DisplayName = "Alpha堆栈张数", ClampMin = "1", ClampMax = "64", UIMin = "1", UIMax = "16"))
+    int32 AlphaStackSampleCount = 4;
 };
 
 USTRUCT(BlueprintType)

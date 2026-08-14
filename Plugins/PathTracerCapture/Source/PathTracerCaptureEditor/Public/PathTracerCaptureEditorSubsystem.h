@@ -114,7 +114,6 @@ private:
     int32 ViewportAuxiliaryAlphaWarmupFramesRemaining = 0;
     int32 ViewportAuxiliaryAlphaCaptureIndex = 0;
     bool bScreenPercentageRaisedForAuxiliaryCapture = false;
-    static constexpr int32 AuxiliaryAlphaCaptureCount = 3;
     TArray<FString> PendingAuxiliaryAlphaCapturePaths;
     FString PendingAuxiliaryAlphaCapturePath;
     TWeakObjectPtr<UWorld> CaptureWorld;
